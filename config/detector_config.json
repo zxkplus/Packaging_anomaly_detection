@@ -1,0 +1,41 @@
+{
+  "preprocessor": {
+    "gaussian_blur_kernel": 5,
+    "median_blur_kernel": 3,
+    "contrast_alpha": 1.2,
+    "brightness_beta": 0,
+    "use_clahe": true,
+    "clahe_clip_limit": 2.0
+  },
+  "circle_detector": {
+    "hough_dp": 1.5,
+    "hough_min_dist": 50,
+    "hough_canny_param1": 100,
+    "hough_accum_threshold": 80,
+    "hough_min_radius": 30,
+    "hough_max_radius": 200,
+    "canny_low": 50,
+    "canny_high": 150,
+    "use_fixed_roi": true,
+    "roi": null
+  },
+  "polar_transform": {
+    "polar_output_height": 200,
+    "polar_output_width": 360,
+    "normalize_circle_size": 300,
+    "interpolation": 1
+  },
+  "defect_detector": {
+    "edge_density_threshold": 1.5,
+    "brightness_var_threshold": 30.0,
+    "detection_radius_ratio": 0.8,
+    "angle_tolerance": 15.0,
+    "reference_angle": 0.0,
+    "use_auto_reference": true,
+    "template_match_threshold": 0.7,
+    "template_path": null
+  },
+  "visualization": true,
+  "save_intermediate": true,
+  "output_dir": "assets/output"
+}
