@@ -129,3 +129,50 @@ class ImagePreprocessor:
         """
         x, y, w, h = roi
         return image[y:y+h, x:x+w]
+
+    #转灰度图
+    def to_gray(self, image: np.ndarray) -> np.ndarray:
+        """
+        转换为灰度图
+
+        Args:
+            image: 输入图像
+
+        Returns:
+            灰度图像
+        """
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        return image
+    
+    ##闭运算
+    def morphological_closing(self, image: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+        """
+        进行闭运算
+
+        Args:
+            image: 输入图像
+            kernel_size: 结构元素的大小
+
+        Returns:
+            闭运算后的图像
+        """
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+        closed = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
+        return closed
+    
+    ##开运算
+    def open_morphological(self, image: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+        """
+        进行开运算
+
+        Args:
+            image: 输入图像
+            kernel_size: 结构元素的大小
+
+        Returns:
+            开运算后的图像
+        """
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
+        opened = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+        return opened
