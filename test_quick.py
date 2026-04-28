@@ -241,32 +241,32 @@ def fit_largest_ellipse(binary_image):
     except Exception as e:
         print(f"椭圆拟合失败: {e}")
         return None, ellipse_image
-
-def extract_and_normalize_ellipse(image, ellipse):
+def extract_and_normalize_ellipse(image, ellipse, target_size=512):
     """
-    从原图中裁剪出椭圆区域，并将椭圆投影成正圆显示
+    从原图中裁剪出椭圆区域，并将椭圆投影变换到固定大小的正圆
     
     Args:
         image: 输入图像 (numpy array)
         ellipse: 椭圆参数 ((center_x, center_y), (axis1, axis2), angle)
+        target_size: 输出正圆图像的固定尺寸（默认512x512）
     
     Returns:
-        normalized_circle: 归一化后的正圆图像
+        normalized_circle: 归一化后的固定大小正圆图像 (target_size x target_size)
         crop_box: 裁剪区域的边界框 (x, y, width, height)
+        transform_matrix: 使用的变换矩阵（可选，用于调试）
     """
     import numpy as np
-    import math
     
     # 解包椭圆参数
     (center_x, center_y), (axis1, axis2), angle = ellipse
     
-    # 确定椭圆的长轴和短轴
+    # 确定长轴和短轴
     major_axis = max(axis1, axis2)
     minor_axis = min(axis1, axis2)
     
-    # 计算外接矩形的大小（考虑旋转角度）
-    # 为了安全起见，使用长轴的两倍作为裁剪区域的边长
-    box_size = int(major_axis * 2) + 20  # 添加一些边距
+    # 计算裁剪区域：使用长轴的外接矩形，添加边距
+    margin = int(major_axis * 0.3)  # 30%的边距
+    box_size = int(major_axis * 2) + margin * 2
     
     # 计算裁剪区域的左上角坐标
     x1 = int(center_x - box_size / 2)
@@ -288,70 +288,57 @@ def extract_and_normalize_ellipse(image, ellipse):
     new_center_x = center_x - x1
     new_center_y = center_y - y1
     
-    # 创建仿射变换矩阵，将椭圆变换为正圆
-    # 首先平移使椭圆中心到原点
-    # 然后旋转消除椭圆的旋转角度
-    # 最后缩放使长短轴相等
+    # 创建目标图像（固定大小）
+    normalized_circle = np.zeros((target_size, target_size, 3), dtype=image.dtype) if len(image.shape) == 3 else \
+                        np.zeros((target_size, target_size), dtype=image.dtype)
     
-    # 输出图像尺寸（正方形）
-    output_size = int(major_axis * 2)
+    # === 关键：构建从椭圆到正圆的映射 ===
+    # 我们需要将椭圆上的点映射到正圆上的点
+    # 椭圆参数方程: x = a*cos(t), y = b*sin(t)
+    # 正圆参数方程: x' = r*cos(t), y' = r*sin(t)
+    # 映射关系: x' = (r/a)*x, y' = (r/b)*y
     
-    # 创建目标图像
-    normalized_circle = np.zeros((output_size, output_size, 3), dtype=image.dtype) if len(image.shape) == 3 else \
-                        np.zeros((output_size, output_size), dtype=image.dtype)
+    # 目标正圆的半径（在target_size图像中）
+    target_radius = target_size // 2 - 10  # 留一些边距
     
-    # 方法：使用极坐标变换或仿射变换
-    # 这里使用更简单的方法：先旋转矫正，再缩放
-    
-    # 步骤1: 旋转图像以消除椭圆的旋转角度
-    rotation_matrix = cv2.getRotationMatrix2D((new_center_x, new_center_y), 0, 1.0)
+    # 步骤1: 先旋转矫正椭圆的角度
+    rotation_angle = -angle  # 反向旋转
+    rotation_matrix = cv2.getRotationMatrix2D((new_center_x, new_center_y), rotation_angle, 1.0)
     rotated_image = cv2.warpAffine(cropped_image, rotation_matrix, 
-                                   (cropped_image.shape[1], cropped_image.shape[0]))
+                                   (cropped_image.shape[1], cropped_image.shape[0]),
+                                   flags=cv2.INTER_LINEAR,
+                                   borderMode=cv2.BORDER_CONSTANT,
+                                   borderValue=0)
     
-    # 步骤2: 计算缩放比例，将椭圆变为正圆
-    scale_x = major_axis / axis1 if axis1 > 0 else 1.0
-    scale_y = major_axis / axis2 if axis2 > 0 else 1.0
+    # 步骤2: 计算缩放比例，将椭圆拉伸为正圆
+    # X方向缩放：将axis1缩放到target_radius
+    scale_x = target_radius / (axis1 / 2) if axis1 > 0 else 1.0
+    # Y方向缩放：将axis2缩放到target_radius
+    scale_y = target_radius / (axis2 / 2) if axis2 > 0 else 1.0
     
-    # 使用非均匀缩放的仿射变换
-    # 构建缩放矩阵
-    scale_matrix = np.array([
-        [scale_x, 0, new_center_x * (1 - scale_x)],
-        [0, scale_y, new_center_y * (1 - scale_y)]
+    # 步骤3: 构建仿射变换矩阵（旋转+缩放+平移）
+    # 先将中心移到原点，然后缩放，再移回目标中心
+    target_center = target_size // 2
+    
+    # 组合变换矩阵
+    # T = Translate(target_center) * Scale(scale_x, scale_y) * Translate(-new_center)
+    transform_matrix = np.array([
+        [scale_x, 0, target_center - scale_x * new_center_x],
+        [0, scale_y, target_center - scale_y * new_center_y]
     ], dtype=np.float32)
     
-    # 应用缩放变换
-    scaled_image = cv2.warpAffine(rotated_image, scale_matrix, 
-                                  (rotated_image.shape[1], rotated_image.shape[0]))
-    
-    # 步骤3: 提取正圆区域
-    circle_radius = int(major_axis)
-    center_in_scaled = (int(new_center_x * scale_x), int(new_center_y * scale_y))
-    
-    # 确保中心点在图像范围内
-    center_in_scaled = (
-        max(0, min(center_in_scaled[0], scaled_image.shape[1] - 1)),
-        max(0, min(center_in_scaled[1], scaled_image.shape[0] - 1))
-    )
-    
-    # 计算提取区域
-    r = circle_radius
-    cx, cy = center_in_scaled
-    x_start = max(0, cx - r)
-    y_start = max(0, cy - r)
-    x_end = min(scaled_image.shape[1], cx + r)
-    y_end = min(scaled_image.shape[0], cy + r)
-    
-    # 提取圆形区域
-    circle_region = scaled_image[y_start:y_end, x_start:x_end]
-    
-    # 调整到固定大小
-    final_size = int(major_axis * 2)
-    normalized_circle = cv2.resize(circle_region, (final_size, final_size))
+    # 应用变换
+    normalized_circle = cv2.warpAffine(rotated_image, transform_matrix, 
+                                       (target_size, target_size),
+                                       flags=cv2.INTER_LINEAR,
+                                       borderMode=cv2.BORDER_CONSTANT,
+                                       borderValue=0)
     
     # 返回结果
     crop_box = (x1, y1, x2 - x1, y2 - y1)
     
-    return normalized_circle, crop_box
+    return normalized_circle, crop_box, transform_matrix
+
 def fill_holes(binary_image):
     """
     填充二值图内部的空洞区域
@@ -622,24 +609,18 @@ def test_all_processor():
             # 提取并归一化椭圆为正圆
             # 同样生成椭圆的二值图
             
-            normalized_circle, crop_box = extract_and_normalize_ellipse(gray_image, ellipse)
+            TARGET_CIRCLE_SIZE = 512  # 根据你的实际标签大小调整
+            normalized_circle, crop_box, transform_matrix = extract_and_normalize_ellipse(gray_image, ellipse, TARGET_CIRCLE_SIZE)
             
-             # 在归一化后的图像上绘制正圆轮廓
-            (center_x, center_y), (axis1, axis2), angle = ellipse
-            major_axis = max(axis1, axis2)
-            
-            # 创建彩色副本用于绘制
+            # 在归一化后的图像上绘制正圆轮廓以验证
             normalized_display = normalized_circle.copy() if len(normalized_circle.shape) == 3 else cv2.cvtColor(normalized_circle.copy(), cv2.COLOR_GRAY2BGR)
-            # 计算正圆的中心和半径
-            circle_center = (normalized_display.shape[1] // 2, normalized_display.shape[0] // 2)
-            circle_radius = int(major_axis)
             
-            # 绘制正圆轮廓（绿色）
+            # 绘制理论正圆（应该与标签边缘重合）
+            circle_center = (TARGET_CIRCLE_SIZE // 2, TARGET_CIRCLE_SIZE // 2)
+            circle_radius = TARGET_CIRCLE_SIZE // 2 - 10
             cv2.circle(normalized_display, circle_center, circle_radius, (0, 255, 0), 2)
-            
-            # 绘制圆心（红色）
             cv2.circle(normalized_display, circle_center, 3, (0, 0, 255), -1)
-
+            
             ##再分一次
             label_region , label_mask =  extract_region_by_grayscale_range(normalized_circle, 140, 180)
             #开运算
@@ -648,25 +629,28 @@ def test_all_processor():
             label_mask = fill_holes(label_mask)
             label_largest_mask, label_largest_contour, label_area = keep_largest_contour_mask(label_mask)
             cv2.bitwise_and(label_region, label_largest_mask, label_region)
+            
+            # 显示结果
+            cv2.imshow("Normalized Circle (Fixed Size)", normalized_display)
             cv2.imshow("label_region", label_region)
-            cv2.imshow("normalized_display", normalized_display)
-            cv2.waitKey(0)
+            #cv2.waitKey(0)
+
             #cv2.imshow("label_mask", label_largest_mask)
             
 
-        # 等待按键事件，按'q'键退出，或者等待一段时间后自动处理下一张
-        # key = cv2.waitKey(0) & 0xFF
-        # if key == ord('q'):
-        #     break
-        # elif key == ord('s'):  # 按's'保存当前处理结果
-        #     output_dir = "assets/output"
-        #     os.makedirs(output_dir, exist_ok=True)
-        #     cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
-        #     print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
-            output_dir = "assets/output"
-            os.makedirs(output_dir, exist_ok=True)
-            cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
-            print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
+            #等待按键事件，按'q'键退出，或者等待一段时间后自动处理下一张
+            key = cv2.waitKey(0) & 0xFF
+            if key == ord('q'):
+                break
+            elif key == ord('s'):  # 按's'保存当前处理结果
+                output_dir = "assets/output"
+                os.makedirs(output_dir, exist_ok=True)
+                cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
+                print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
+            # output_dir = "assets/output"
+            # os.makedirs(output_dir, exist_ok=True)
+            # cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
+            # print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
         
         # 关闭所有窗口
         cv2.destroyAllWindows()
