@@ -61,11 +61,86 @@ def extract_features(image_path):
     return np.array(features)
 
 
+def extract_features_from_array(image_array):
+    """
+    从图像数组中提取多种特征用于分类
+    """
+    # 读取图像
+    if len(image_array.shape) == 3:
+        img = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+    else:
+        img = image_array
+    
+    if img is None:
+        print(f"Warning: Could not process image array")
+        return None
+
+    features = []
+
+    # 1. HOG 特征 (Histogram of Oriented Gradients)
+    hog_features = hog(img, orientations=9, pixels_per_cell=(8, 8),
+                       cells_per_block=(2, 2), block_norm='L2-Hys', feature_vector=True)
+    features.extend(hog_features)
+
+    # 2. 边缘密度特征
+    edges = cv2.Canny(img, 50, 150)
+    edge_density = np.sum(edges > 0) / (edges.shape[0] * edges.shape[1])
+    features.append(edge_density)
+
+    # 3. 纹理特征
+    blurred = cv2.GaussianBlur(img, (15, 15), 0)
+    texture_var = cv2.meanStdDev(img - blurred)[1].flatten()[0]
+    features.append(texture_var)
+
+    # 4. 区域特征 (灰度直方图)
+    hist, _ = np.histogram(img.flatten(), bins=32, range=[0, 256])
+    features.extend(hist / (img.shape[0] * img.shape[1]))
+
+    # 5. 形状特征
+    _, binary = cv2.threshold(img, 50, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if contours:
+        largest_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest_contour)
+        perimeter = cv2.arcLength(largest_contour, True)
+        
+        if area > 0:
+            circularity = (4 * np.pi * area) / (perimeter * perimeter) if perimeter > 0 else 0
+            features.append(circularity)
+        else:
+            features.append(0)
+        
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        bbox_area = w * h
+        ratio_area_bbox = area / bbox_area if bbox_area > 0 else 0
+        features.append(ratio_area_bbox)
+    else:
+        features.extend([0, 0])
+
+    return np.array(features)
+
+
 def predict_single_image(image_path, model, scaler):
     """
     对单张图像进行预测
     """
     features = extract_features(image_path)
+    if features is None:
+        return None, None
+    
+    features_scaled = scaler.transform([features])
+    prediction = model.predict(features_scaled)[0]
+    probabilities = model.predict_proba(features_scaled)[0]
+    
+    return prediction, probabilities
+
+
+def predict_single_image_from_array(image_array, model, scaler):
+    """
+    对单张图像数组进行预测
+    """
+    features = extract_features_from_array(image_array)
     if features is None:
         return None, None
     
