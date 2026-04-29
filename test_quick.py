@@ -9,6 +9,9 @@ from src.label_detector import LabelDetector, get_detector
 import cv2
 from src.label_detector.preprocessor import ImagePreprocessor
 from src.label_detector.circle_detector import CircleDetector
+import glob
+import joblib
+from predict_labels import extract_features_from_array
 
 
 def test_basic_functionality():
@@ -503,9 +506,8 @@ def keep_largest_n_contours_mask(binary_image, n=1):
 
 def test_all_processor():
     """测试预处理器，批量处理显示一个文件夹下的文件"""
-    import glob
     
-    image_dir = "/home/industai/zengxinke/wuliangyedata/17/DA6316180"
+    image_dir = "/home/industai/workspace/Packaging_anomaly_detection/assets/error_test/DA6316180"
     
     # 获取目录下所有支持格式的图片文件
     extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
@@ -560,7 +562,7 @@ def test_all_processor():
         #cv2.imshow(f"Grayscale - {os.path.basename(image_path)}", gray_image)
 
         # 阈值分割
-        _, thresh_image = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY_INV)
+        thresh_image = preprocessor.threshold_image(gray_image, threshold=200, max_value=255, is_inv=True)
         #cv2.imshow(f"Threshold - {os.path.basename(image_path)}", thresh_image)
         #cv2.waitKey(0)
         # 圆形检测,这步只是为了定位到位置
@@ -572,12 +574,6 @@ def test_all_processor():
         # cv2.imshow(f"Circle Detection - {os.path.basename(image_path)}", result_image_with_circles)
         ##根据检测到的圆形区域进行裁剪并保存
         region = circles[0]
-        # ##裁剪圆形区域
-        # cropped_image , _  = circle_detector.extract_circle_region(thresh_image, region, padding=10)
-        # cropped_roi , _  = circle_detector.extract_circle_region(roi_image, region, padding=10) 
-        # # cv2.imshow(f"Circle Region - {os.path.basename(image_path)}", cropped_roi)
-        # # cv2.imshow(f"Cropped Circle - {os.path.basename(image_path)}", cropped_image)
-        # # cv2.imwrite(f"{os.path.splitext(image_path)[0]}_circle_region.jpg", cropped_image)
 
         ##只提取出圆形区域，生成圆形区域二值图
         mask = generate_circle_mask(thresh_image,region[0],region[1],region[2] + 10)
@@ -592,13 +588,16 @@ def test_all_processor():
         cv2.bitwise_and(range_mask,mask,range_mask)
         ## 填充内部的空洞区域
         range_mask = fill_holes(range_mask)
+        # cv2.imshow(f"range_mask - {os.path.basename(image_path)}", range_mask)
+        # cv2.waitKey(0)
         #开运算
-        range_mask = preprocessor.open_morphological(range_mask,5)
+        range_mask = preprocessor.open_morphological(range_mask,2)
 
         # # #对mask开运算
         mask = preprocessor.open_morphological(range_mask,2)
         # 只保留最大面积的轮廓
         largest_mask, largest_contour, area = keep_largest_contour_mask(mask)
+        largest_mask = fill_holes(largest_mask)
         #cv2.imshow("largest_mask", largest_mask)
         ## 拟合椭圆
         ellipse, ellipse_image = fit_largest_ellipse(largest_mask)
@@ -624,38 +623,173 @@ def test_all_processor():
             ##再分一次
             label_region , label_mask =  extract_region_by_grayscale_range(normalized_circle, 140, 180)
             #开运算
-            label_mask = preprocessor.open_morphological(label_mask, 5)
+            label_mask = preprocessor.open_morphological(label_mask, 2)
             #填充内部
             label_mask = fill_holes(label_mask)
             label_largest_mask, label_largest_contour, label_area = keep_largest_contour_mask(label_mask)
-            cv2.bitwise_and(label_region, label_largest_mask, label_region)
+            label_largest_mask = fill_holes(label_largest_mask)
+            # cv2.imshow("label_largest_mask", label_largest_mask)
+            # cv2.waitKey(0);
+
+            cv2.bitwise_and(normalized_circle, label_largest_mask, normalized_circle)
             
             # 显示结果
             cv2.imshow("Normalized Circle (Fixed Size)", normalized_display)
-            cv2.imshow("label_region", label_region)
+            cv2.imshow("normalized_circle", normalized_circle)
             #cv2.waitKey(0)
 
             #cv2.imshow("label_mask", label_largest_mask)
             
 
             #等待按键事件，按'q'键退出，或者等待一段时间后自动处理下一张
-            key = cv2.waitKey(0) & 0xFF
-            if key == ord('q'):
-                break
-            elif key == ord('s'):  # 按's'保存当前处理结果
-                output_dir = "assets/output"
-                os.makedirs(output_dir, exist_ok=True)
-                cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
-                print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
-            # output_dir = "assets/output"
-            # os.makedirs(output_dir, exist_ok=True)
-            # cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
-            # print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
+            # key = cv2.waitKey(0) & 0xFF
+            # if key == ord('q'):
+            #     break
+            # elif key == ord('s'):  # 按's'保存当前处理结果
+            #     output_dir = "assets/output"
+            #     os.makedirs(output_dir, exist_ok=True)
+            #     cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), label_region)
+            #     print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
+            cv2.waitKey(1)
+            output_dir = "assets/output"
+            os.makedirs(output_dir, exist_ok=True)
+            cv2.imwrite(os.path.join(output_dir, f"processed_{os.path.basename(image_path)}"), normalized_circle)
+            print(f"  已保存处理结果到: processed_{os.path.basename(image_path)}")
         
         # 关闭所有窗口
         cv2.destroyAllWindows()
 
     print("批量处理完成")
+
+def test_prediction():
+    ## 测试直接推理出NG和OK,然后保存在save_dir中
+    image_dir = "/home/industai/workspace/Packaging_anomaly_detection/assets/error_test/DA6316180/"
+    save_dir = "/home/industai/workspace/Packaging_anomaly_detection/assets/error_test/result/"
+    
+    # 加载训练好的模型和标准化器
+    model_path = "label_detection_svm_model.pkl"
+    scaler_path = "label_detection_scaler.pkl"
+    
+    if not os.path.exists(model_path) or not os.path.exists(scaler_path):
+        print(f"Error: Model files not found. Please run train_label_detector.py first.")
+        return
+    
+    print("Loading trained model and scaler...")
+    model = joblib.load(model_path)
+    scaler = joblib.load(scaler_path)
+    print("Model loaded successfully!")
+
+
+    # 获取目录下所有支持格式的图片文件
+    extensions = ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']
+    image_files = []
+    for ext in extensions:
+        image_files.extend(glob.glob(os.path.join(image_dir, ext)))
+        image_files.extend(glob.glob(os.path.join(image_dir, ext.upper())))
+    
+    # 按文件名排序
+    image_files.sort()
+    
+    if not image_files:
+        print(f"在目录 {image_dir} 中没有找到图片文件")
+        return
+    
+    print(f"找到 {len(image_files)} 个图片文件")
+    
+    # 定义ROI区域 (x, y, width, height)
+    roi = (100, 1100, 1800, 2000)
+    # 创建预处理器和圆形检测器实例
+    preprocessor = ImagePreprocessor({})
+    
+    # 圆形检测器配置
+    circle_detector_config = {
+        "hough_min_radius": 350,
+        "hough_max_radius": 500,
+        "hough_min_dist":1000
+    }
+    circle_detector = CircleDetector(circle_detector_config)
+    for i, image_path in enumerate(image_files):
+        print(f"正在处理第 {i+1}/{len(image_files)} 个文件: {os.path.basename(image_path)}")
+        
+        # 读取彩色图像
+        color_image = cv2.imread(image_path)
+        if color_image is None:
+            print(f"  无法读取图像: {image_path}")
+            continue
+            
+        # 提取ROI区域
+        roi_image = preprocessor.extract_roi(color_image, roi)
+        if roi_image is None:
+            print(f"  ROI提取失败: {image_path}")
+            continue
+        gray_image = preprocessor.to_gray(roi_image)
+        # 阈值分割
+        thresh_image = preprocessor.threshold_image(gray_image, threshold=200, max_value=255, is_inv=True)
+        # 圆形检测，这步主要是为了定位到标签的位置，方便后续处理
+        circles = circle_detector.detect_circles(roi_image, thresh_image)
+        print(f"  检测到 {len(circles)} 个圆形")
+        region = circles[0]
+        ##只提取出圆形区域，生成圆形区域二值图
+        mask = generate_circle_mask(thresh_image,region[0],region[1],region[2] + 10)
+        cv2.bitwise_and(gray_image,mask,gray_image)
+        range_region , range_mask = extract_region_by_grayscale_range(gray_image, 0, 180)
+        cv2.bitwise_and(range_mask,mask,range_mask)
+        ## 填充内部的空洞区域
+        range_mask = fill_holes(range_mask)
+        range_mask = preprocessor.open_morphological(range_mask,2)
+        # # #对mask开运算
+        mask = preprocessor.open_morphological(range_mask,2)
+        # 只保留最大面积的轮廓
+        largest_mask, largest_contour, area = keep_largest_contour_mask(mask)
+        ## 拟合椭圆
+        largest_mask = fill_holes(largest_mask)
+        ellipse, ellipse_image = fit_largest_ellipse(largest_mask)
+        ## 在原图上裁剪出椭圆区域，并且将椭圆投影成正圆显示
+        cv2.bitwise_and(gray_image,largest_mask,gray_image)
+        #找到的了椭圆，也就是找到了标签外面的框
+        if ellipse is not None:
+            TARGET_CIRCLE_SIZE = 512  # 根据你的实际标签大小调整
+            normalized_circle, crop_box, transform_matrix = extract_and_normalize_ellipse(gray_image, ellipse, TARGET_CIRCLE_SIZE)
+            # 在归一化后的图像上绘制正圆轮廓以验证
+            normalized_display = normalized_circle.copy() if len(normalized_circle.shape) == 3 else cv2.cvtColor(normalized_circle.copy(), cv2.COLOR_GRAY2BGR)
+            ##再分一次
+            label_region , label_mask =  extract_region_by_grayscale_range(normalized_circle, 140, 180)
+            #开运算
+            label_mask = preprocessor.open_morphological(label_mask, 2)
+            #填充内部
+            label_mask = fill_holes(label_mask)
+            label_largest_mask, label_largest_contour, label_area = keep_largest_contour_mask(label_mask)
+            label_largest_mask = fill_holes(label_largest_mask)
+            cv2.bitwise_and(normalized_circle, label_largest_mask, normalized_circle)
+            #label_region 就是投影为正圆的标签
+            # 预测标签区域
+            features = extract_features_from_array(normalized_circle)
+            if features is not None:
+                features_scaled = scaler.transform([features])
+                prediction = model.predict(features_scaled)[0]
+                probabilities = model.predict_proba(features_scaled)[0]
+                
+                result_text = 'OK' if prediction == 0 else 'ERROR'
+                confidence_ok = probabilities[0]
+                confidence_error = probabilities[1]
+                
+                print(f"  预测结果: {result_text} | OK置信度: {confidence_ok:.3f} | ERROR置信度: {confidence_error:.3f}")
+                
+                # 创建保存目录
+                os.makedirs(save_dir, exist_ok=True)
+                
+                # 根据预测结果保存到不同子目录
+                result_subdir = os.path.join(save_dir, result_text)
+                os.makedirs(result_subdir, exist_ok=True)
+                
+                # 在原图color_image的图像正中 上puttext NG 或者 OK 的结果
+                cv2.putText(color_image, result_text, (color_image.shape[1] // 2 - 1000, color_image.shape[0] // 2 - 500), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                cv2.imwrite(os.path.join(result_subdir, os.path.basename(image_path)), color_image)
+                print(f"  保存结果: {result_subdir}")
+            else:
+                print(f"  特征提取失败: {image_path}")
+        else:
+            print(f"  椭圆拟合失败: {image_path}")
 
 
 
