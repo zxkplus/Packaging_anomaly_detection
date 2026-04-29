@@ -176,3 +176,23 @@ class ImagePreprocessor:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_size, kernel_size))
         opened = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
         return opened
+    ##阈值分割
+    def threshold_image(self, image: np.ndarray, threshold: int = 200, max_value: int = 255,is_inv: bool = True) -> np.ndarray:
+        """
+        进行阈值分割
+
+        Args:
+            image: 输入图像
+            threshold: 阈值
+            max_value: 最大值
+            is_inv: 是否进行反向阈值分割
+
+        Returns:
+            阈值分割后的图像
+        """
+        if is_inv:
+            _, image = cv2.threshold(image, threshold, max_value, cv2.THRESH_BINARY_INV)
+        else:
+            _, image = cv2.threshold(image, threshold, max_value, cv2.THRESH_BINARY)
+        return image
+
